@@ -8,6 +8,9 @@ import { OAuth2Client } from "google-auth-library";
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // ===== REGISTER =====
+// Add this import at the top of authController.js
+import { sendVerificationEmail } from "../utils/sendVerificationEmail.js";
+
 export const register = async (req, res) => {
   try { 
     const { name, email, password } = req.body;
@@ -15,10 +18,9 @@ export const register = async (req, res) => {
 
     if (user) {
       if (!user.isVerified) {
-        // resend verification
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "2h" });
-        const link = `${process.env.CLIENT_URL}/verify/${token}`;
-        await sendEmail(user.email, "Verify your email", `Click to verify: ${link}`);
+        // FIX: Use the utility function
+        await sendVerificationEmail(user.email, token); 
         return res.status(200).json({ message: "Verification email resent. Check inbox." });
       }
       return res.status(400).json({ message: "User already exists and verified" });
@@ -28,12 +30,14 @@ export const register = async (req, res) => {
     user = await User.create({ name, email, password: hashedPassword });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30m" });
-    const link = `${process.env.CLIENT_URL}/verify/${token}`;
-    await sendEmail(user.email, "Verify your email", `Click to verify: ${link}`);
+    
+    // FIX: Use the utility function and AWAIT it
+    await sendVerificationEmail(user.email, token);
 
     res.status(201).json({ message: "User registered. Verification email sent!" });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Signup Error:", err); // Log the actual error to Render logs
+    res.status(500).json({ message: "Registration failed. Please try again." });
   }
 };
 
