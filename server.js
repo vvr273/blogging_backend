@@ -6,7 +6,6 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import blogRoutes from "./routes/blogRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
-import arcjectm from "./middlewares/arcjectMiddleware.js";
 
 
 dotenv.config();
@@ -15,7 +14,7 @@ const PORT = process.env.PORT || 5000;
 
 // CORS
 app.use(cors({
-  origin: "http://localhost:5173",
+  origin: "*",
   credentials: true,
 }));
 
