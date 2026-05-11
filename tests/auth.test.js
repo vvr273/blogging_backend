@@ -36,6 +36,8 @@ test("GET /api/auth/dashboard returns user data for valid token", async () => {
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(response.status, 200);
-  assert.equal(response.body.email, "auth@example.com");
-  assert.equal(response.body.name, "Auth User");
+  assert.equal(response.body.success, true);
+  assert.equal(response.body.data.email, "auth@example.com");
+  assert.equal(response.body.data.name, "Auth User");
+  assert.ok(response.body.requestId);
 });
