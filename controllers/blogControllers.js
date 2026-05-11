@@ -1,4 +1,25 @@
 import Blog from "../models/Blog.js";
+import Comment from "../models/Comment.js";
+
+const buildBlogWithComments = async (blogId) => {
+  const blog = await Blog.findById(blogId).populate("author", "name email");
+  if (!blog) return null;
+
+  const comments = await Comment.find({ blog: blogId })
+    .sort({ createdAt: 1 })
+    .populate("user", "name");
+
+  const payload = blog.toObject();
+  payload.comments = comments.map((comment) => ({
+    _id: comment._id,
+    user: comment.user,
+    text: comment.text,
+    createdAt: comment.createdAt,
+    editedAt: comment.editedAt,
+  }));
+
+  return payload;
+};
 
 // Create a new blog
 export const createBlog = async (req, res) => {
@@ -56,8 +77,18 @@ export const getSingleBlog = async (req, res) => {
     // Increment views
     blog.views += 1;
     await blog.save();
-
-    res.json(blog);
+    const comments = await Comment.find({ blog: blog._id })
+      .sort({ createdAt: 1 })
+      .populate("user", "name");
+    const payload = blog.toObject();
+    payload.comments = comments.map((comment) => ({
+      _id: comment._id,
+      user: comment.user,
+      text: comment.text,
+      createdAt: comment.createdAt,
+      editedAt: comment.editedAt,
+    }));
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -96,6 +127,7 @@ export const deleteBlog = async (req, res) => {
 
     if (blog.author.toString() !== req.user._id.toString()) return res.status(403).json({ message: "Not authorized" });
 
+    await Comment.deleteMany({ blog: blog._id });
     await blog.deleteOne();
     res.json({ message: "Blog deleted successfully" });
   } catch (err) {
@@ -138,20 +170,25 @@ export const toggleLike = async (req, res) => {
 //   }
 // };
 export const addComment = async (req, res) => {
-  const { text } = req.body;
-  if (!text) return res.status(400).json({ message: "Comment cannot be empty" });
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ message: "Comment cannot be empty" });
 
-  const blog = await Blog.findById(req.params.id);
-  if (!blog) return res.status(404).json({ message: "Blog not found" });
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ message: "Blog not found" });
+    if (!blog.commentable) {
+      return res.status(403).json({ message: "Comments disabled for this post" });
+    }
 
-  blog.comments.push({ user: req.user._id, text });
-  await blog.save();
+    await Comment.create({ blog: blog._id, user: req.user._id, text });
+    blog.commentsCount += 1;
+    await blog.save();
 
-  const populatedBlog = await Blog.findById(blog._id)
-    .populate("author", "name")
-    .populate("comments.user", "name");
-
-  res.json(populatedBlog);
+    const payload = await buildBlogWithComments(blog._id);
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
 // Delete Comment
@@ -268,25 +305,22 @@ export const editComment = async (req, res) => {
       return res.status(404).json({ message: "Blog not found" });
     }
 
-    const comment = blog.comments.id(commentId);
+    const comment = await Comment.findOne({ _id: commentId, blog: id });
     if (!comment) {
       return res.status(404).json({ message: "Comment not found" });
     }
 
     // only comment author can edit
-    if (comment.user.toString() !== req.user.id) {
+    if (comment.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
     comment.text = text;
     comment.editedAt = new Date();
+    await comment.save();
 
-    await blog.save();
-
-    const updated = await Blog.findById(id)
-      .populate("comments.user", "name");
-
-    res.json(updated);
+    const payload = await buildBlogWithComments(id);
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -301,7 +335,7 @@ export const deleteComment = async (req, res) => {
       return res.status(404).json({ message: "Blog not found" });
     }
 
-    const comment = blog.comments.id(commentId);
+    const comment = await Comment.findOne({ _id: commentId, blog: id });
     if (!comment) {
       return res.status(404).json({ message: "Comment not found" });
     }
@@ -313,14 +347,14 @@ export const deleteComment = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    blog.comments.pull(commentId);
+    await Comment.deleteOne({ _id: commentId });
+    if (blog.commentsCount > 0) {
+      blog.commentsCount -= 1;
+    }
     await blog.save();
 
-    const populatedBlog = await Blog.findById(blog._id)
-      .populate("author", "name")
-      .populate("comments.user", "name");
-
-    res.json(populatedBlog);
+    const payload = await buildBlogWithComments(blog._id);
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

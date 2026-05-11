@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "migrate:comments": "node scripts/migrateEmbeddedComments.js"
   },
   "keywords": [],
   "author": "",
@@ -30,4 +31,3 @@
     "nodemon": "^3.1.10"
   }
 }
-

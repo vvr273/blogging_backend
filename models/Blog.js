@@ -14,16 +14,7 @@ const blogSchema = new mongoose.Schema(
     image: { type: String, default: "" },
     commentable: { type: Boolean, default: true },
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    comments: [
-  {
-    _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    text: { type: String, required: true, trim: true, maxlength: 1000 },
-    createdAt: { type: Date, default: Date.now },
-    editedAt: { type: Date }
-  }
-],
-
+    commentsCount: { type: Number, default: 0, min: 0 },
     shares: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // optional
     views: { type: Number, default: 0 },
     tags: [{ type: String, trim: true, lowercase: true }],
