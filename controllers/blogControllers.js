@@ -152,23 +152,6 @@ export const toggleLike = async (req, res) => {
   }
 };
 
-// // Add Comment
-// export const addComment = async (req, res) => {
-//   try {
-//     const { text } = req.body;
-//     if (!text) return res.status(400).json({ message: "Comment cannot be empty" });
-
-//     const blog = await Blog.findById(req.params.id);
-//     if (!blog) return res.status(404).json({ message: "Blog not found" });
-//     if (!blog.commentable) return res.status(403).json({ message: "Comments disabled for this post" });
-
-//     blog.comments.push({ user: req.user._id, text });
-//     await blog.save();
-//     res.json(blog);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// };
 export const addComment = async (req, res) => {
   try {
     const { text } = req.body;
@@ -190,26 +173,6 @@ export const addComment = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-// Delete Comment
-// export const deleteComment = async (req, res) => {
-//   try {
-//     const { commentId } = req.params;
-//     const blog = await Blog.findById(req.params.id);
-//     if (!blog) return res.status(404).json({ message: "Blog not found" });
-
-//     const comment = blog.comments.id(commentId);
-//     if (!comment) return res.status(404).json({ message: "Comment not found" });
-
-//     if (comment.user.toString() !== req.user._id.toString()) return res.status(403).json({ message: "Not authorized" });
-
-//     comment.remove();
-//     await blog.save();
-//     res.json(blog);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// };
 
 // Share a blog
 export const shareBlog = async (req, res) => {
@@ -269,28 +232,6 @@ export const getTrendingBlogs = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-// POST /api/blogs/:id/like
-// export const toggleLike = async (req, res) => {
-//   const userId = req.user.id;
-//   const blog = await Blog.findById(req.params.id);
-
-//   if (!blog) return res.status(404).json({ msg: "Blog not found" });
-
-//   const index = blog.likes.indexOf(userId);
-
-//   if (index === -1) blog.likes.push(userId);
-//   else blog.likes.splice(index, 1);
-
-//   await blog.save();
-//   res.json({ likesCount: blog.likes.length });
-// };
-// PUT /api/blogs/:id/comments/:commentId
-// ... existing imports
-
-// ---------------------------------------------------------
-// EDIT COMMENT
-// Permission: Only the user who wrote the comment
-// ---------------------------------------------------------
 export const editComment = async (req, res) => {
   try {
     const { id, commentId } = req.params;
