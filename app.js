@@ -24,6 +24,10 @@ app.use(
       if (allowedOrigins.includes(origin)) return callback(null, true);
       return callback(new Error("Not allowed by CORS"));
     },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    maxAge: 86400,
+    optionsSuccessStatus: 204,
     credentials: true,
   })
 );
