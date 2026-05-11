@@ -6,18 +6,24 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import blogRoutes from "./routes/blogRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
+import { errorHandler, notFound } from "./middlewares/errorMiddleware.js";
 
 
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
+const allowedOrigins = (process.env.CORS_ORIGIN || process.env.CLIENT_URL || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 // CORS
 app.use(cors({
-
-
-  origin: "*",
-
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
   credentials: true,
 }));
 
@@ -30,6 +36,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/blogs",blogRoutes);
 app.use("/api/profile", profileRoutes);
 
+app.use(notFound);
+app.use(errorHandler);
 
 
 // Start Server
