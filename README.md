@@ -42,8 +42,12 @@ MONGO_URI=mongodb_connection_string
 JWT_SECRET=your_jwt_secret
 CLIENT_URL=http://localhost:5173
 
+# SMTP (Gmail) config
 EMAIL_USER=your_gmail_address
 EMAIL_PASS=your_gmail_app_password
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
 
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
 
