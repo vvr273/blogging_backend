@@ -293,24 +293,35 @@ export const editComment = async (req, res) => {
 };
 
 export const deleteComment = async (req, res) => {
-  const { id, commentId } = req.params;
+  try {
+    const { id, commentId } = req.params;
 
-  const blog = await Blog.findById(id);
-  const comment = blog.comments.id(commentId);
+    const blog = await Blog.findById(id);
+    if (!blog) {
+      return res.status(404).json({ message: "Blog not found" });
+    }
 
-  const isCommentAuthor = comment.user.toString() === req.user._id.toString();
-  const isBlogAuthor = blog.author.toString() === req.user._id.toString();
+    const comment = blog.comments.id(commentId);
+    if (!comment) {
+      return res.status(404).json({ message: "Comment not found" });
+    }
 
-  if (!isCommentAuthor && !isBlogAuthor) {
-    return res.status(403).json({ message: "Not authorized" });
+    const isCommentAuthor = comment.user.toString() === req.user._id.toString();
+    const isBlogAuthor = blog.author.toString() === req.user._id.toString();
+
+    if (!isCommentAuthor && !isBlogAuthor) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    blog.comments.pull(commentId);
+    await blog.save();
+
+    const populatedBlog = await Blog.findById(blog._id)
+      .populate("author", "name")
+      .populate("comments.user", "name");
+
+    res.json(populatedBlog);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-
-  blog.comments.pull(commentId);
-  await blog.save();
-
-  const populatedBlog = await Blog.findById(blog._id)
-    .populate("author", "name")
-    .populate("comments.user", "name");
-
-  res.json(populatedBlog);
 };

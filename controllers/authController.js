@@ -2,7 +2,6 @@ import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import sendEmail from "../utils/sendEmail.js";
 import { OAuth2Client } from "google-auth-library";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -112,18 +111,32 @@ import { sendResetPasswordEmail } from "../utils/sendResetPasswordEmail.js";
 // Make sure User is also imported
 
 export const forgotPassword = async (req, res) => {
-  const { email } = req.body;
-  const user = await User.findOne({ email });
-  if (!user) return res.status(400).json({ message: "User not found" });
+  try {
+    const { email } = req.body;
+    const genericMessage =
+      "If an account with that email exists, a password reset link has been sent.";
 
-  const token = crypto.randomBytes(20).toString("hex");
-  user.resetPasswordToken = token;
-  user.resetPasswordExpires = Date.now() + 3600000;
-  await user.save();
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
 
-  await sendResetPasswordEmail(user.email, token);
+    const user = await User.findOne({ email });
+    if (!user) return res.json({ message: genericMessage });
 
-  res.json({ message: "Password reset email sent" });
+    const token = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    user.resetPasswordToken = hashedToken;
+    user.resetPasswordExpires = Date.now() + 3600000;
+    await user.save();
+
+    await sendResetPasswordEmail(user.email, token);
+
+    res.json({ message: genericMessage });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    res.status(500).json({ message: "Failed to process password reset request" });
+  }
 };
 
 
@@ -149,9 +162,10 @@ export const forgotPassword = async (req, res) => {
 export const resetPassword = async (req, res) => {
   const { token } = req.params;
   const { password } = req.body;
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
   const user = await User.findOne({
-    resetPasswordToken: token,
+    resetPasswordToken: hashedToken,
     resetPasswordExpires: { $gt: Date.now() }
   });
 
