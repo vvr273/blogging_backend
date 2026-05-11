@@ -9,6 +9,16 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 // ===== REGISTER =====
 // Add this import at the top of authController.js
 import { sendVerificationEmail } from "../utils/sendVerificationEmail.js";
+const queueVerificationEmail = (user, expiresIn = "30m") => {
+  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn });
+  sendVerificationEmail(user.email, token).catch((err) => {
+    console.error("Verification email queue failed:", {
+      userId: user._id?.toString?.(),
+      email: user.email,
+      message: err.message,
+    });
+  });
+};
 
 export const register = async (req, res) => {
   try { 
@@ -17,10 +27,8 @@ export const register = async (req, res) => {
 
     if (user) {
       if (!user.isVerified) {
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "2h" });
-        // FIX: Use the utility function
-        await sendVerificationEmail(user.email, token); 
-        return res.status(200).json({ message: "Verification email resent. Check inbox." });
+        queueVerificationEmail(user, "2h");
+        return res.status(200).json({ message: "Verification email queued. Check inbox." });
       }
       return res.status(400).json({ message: "User already exists and verified" });
     }
@@ -28,15 +36,29 @@ export const register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     user = await User.create({ name, email, password: hashedPassword });
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30m" });
-    
-    // FIX: Use the utility function and AWAIT it
-    await sendVerificationEmail(user.email, token);
-
-    res.status(201).json({ message: "User registered. Verification email sent!" });
+    queueVerificationEmail(user, "30m");
+    res.status(201).json({ message: "User registered. Verification email queued." });
   } catch (err) {
     console.error("Signup Error:", err); // Log the actual error to Render logs
     res.status(500).json({ message: "Registration failed. Please try again." });
+  }
+};
+
+export const resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const genericMessage = "If the account exists and is not verified, a verification email has been queued.";
+    const user = await User.findOne({ email });
+    if (!user || user.isVerified) return res.json({ message: genericMessage });
+    queueVerificationEmail(user, "2h");
+    return res.json({ message: genericMessage });
+  } catch (err) {
+    console.error("Resend verification error:", {
+      requestId: req.requestId,
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ message: "Failed to queue verification email" });
   }
 };
 
