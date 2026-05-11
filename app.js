@@ -7,6 +7,7 @@ import blogRoutes from "./routes/blogRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import { errorHandler, notFound } from "./middlewares/errorMiddleware.js";
 import { requestLogger } from "./middlewares/requestLogger.js";
+import { requestContext } from "./middlewares/requestContext.js";
 
 const app = express();
 
@@ -16,6 +17,7 @@ const allowedOrigins = (process.env.CORS_ORIGIN || process.env.CLIENT_URL || "")
   .filter(Boolean);
 
 app.use(helmet());
+app.use(requestContext);
 app.use(requestLogger);
 app.use(
   cors({

@@ -11,5 +11,6 @@ export const errorHandler = (err, req, res, next) => {
     message: err.message || "Internal server error",
     code: statusCode >= 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
     details: [],
+    requestId: req.requestId,
   });
 };

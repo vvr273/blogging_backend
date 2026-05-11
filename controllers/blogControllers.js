@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Blog from "../models/Blog.js";
 import Comment from "../models/Comment.js";
 
@@ -11,18 +12,54 @@ const parsePagination = (req, defaults = { page: 1, limit: 10, maxLimit: 100 }) 
   return { page, limit, skip: (page - 1) * limit };
 };
 
-const buildBlogWithComments = async (blogId, options = { page: 1, limit: 20 }) => {
+const buildBlogWithComments = async (blogId, options = { page: 1, limit: 20, cursor: null }) => {
   const blog = await Blog.findById(blogId).populate("author", "name email");
   if (!blog) return null;
 
-  const { page, limit } = options;
-  const skip = (page - 1) * limit;
-  const totalComments = await Comment.countDocuments({ blog: blogId });
-  const comments = await Comment.find({ blog: blogId })
-    .sort({ createdAt: 1 })
-    .skip(skip)
-    .limit(limit)
-    .populate("user", "name");
+  const { page, limit, cursor } = options;
+  let comments = [];
+  let commentsPagination = {};
+
+  if (cursor) {
+    const cursorFilter = mongoose.Types.ObjectId.isValid(cursor)
+      ? { _id: { $gt: new mongoose.Types.ObjectId(cursor) } }
+      : {};
+
+    const rows = await Comment.find({ blog: blogId, ...cursorFilter })
+      .sort({ _id: 1 })
+      .limit(limit + 1)
+      .populate("user", "name");
+
+    const hasMore = rows.length > limit;
+    const sliced = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? sliced[sliced.length - 1]?._id?.toString() : null;
+
+    comments = sliced;
+    commentsPagination = {
+      mode: "cursor",
+      limit,
+      nextCursor,
+      hasMore,
+    };
+  } else {
+    const skip = (page - 1) * limit;
+    const totalComments = await Comment.countDocuments({ blog: blogId });
+    comments = await Comment.find({ blog: blogId })
+      .sort({ createdAt: 1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("user", "name");
+
+    commentsPagination = {
+      mode: "page",
+      page,
+      limit,
+      total: totalComments,
+      totalPages: Math.ceil(totalComments / limit) || 1,
+      nextCursor: comments.length ? comments[comments.length - 1]?._id?.toString() : null,
+      hasMore: skip + comments.length < totalComments,
+    };
+  }
 
   const payload = blog.toObject();
   payload.comments = comments.map((comment) => ({
@@ -32,17 +69,11 @@ const buildBlogWithComments = async (blogId, options = { page: 1, limit: 20 }) =
     createdAt: comment.createdAt,
     editedAt: comment.editedAt,
   }));
-  payload.commentsPagination = {
-    page,
-    limit,
-    total: totalComments,
-    totalPages: Math.ceil(totalComments / limit) || 1,
-  };
+  payload.commentsPagination = commentsPagination;
 
   return payload;
 };
 
-// Create a new blog
 export const createBlog = async (req, res) => {
   try {
     const { title, description, searchDescription, content, image, commentable, tags, category } = req.body;
@@ -67,7 +98,6 @@ export const createBlog = async (req, res) => {
   }
 };
 
-// Get all blogs
 export const getAllBlogs = async (req, res) => {
   try {
     const hasPaginationQuery = req.query.page !== undefined || req.query.limit !== undefined;
@@ -90,7 +120,7 @@ export const getAllBlogs = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-// Get blogs of the logged-in user
+
 export const getMyBlogs = async (req, res) => {
   try {
     const hasPaginationQuery = req.query.page !== undefined || req.query.limit !== undefined;
@@ -114,25 +144,24 @@ export const getMyBlogs = async (req, res) => {
   }
 };
 
-
-// Get single blog & increment views
 export const getSingleBlog = async (req, res) => {
   try {
     const { page, limit } = parsePagination(req, { page: 1, limit: 20, maxLimit: 100 });
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : null;
+
     const blog = await Blog.findById(req.params.id).populate("author", "name email");
     if (!blog) return res.status(404).json({ message: "Blog not found" });
 
-    // Increment views
     blog.views += 1;
     await blog.save();
-    const payload = await buildBlogWithComments(blog._id, { page, limit });
+
+    const payload = await buildBlogWithComments(blog._id, { page, limit, cursor });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// Update blog
 export const updateBlog = async (req, res) => {
   try {
     const { title, description, searchDescription, content, image, commentable, tags, category } = req.body;
@@ -157,7 +186,6 @@ export const updateBlog = async (req, res) => {
   }
 };
 
-// Delete blog
 export const deleteBlog = async (req, res) => {
   try {
     const blog = await Blog.findById(req.params.id);
@@ -173,7 +201,6 @@ export const deleteBlog = async (req, res) => {
   }
 };
 
-// Toggle Like
 export const toggleLike = async (req, res) => {
   try {
     const blog = await Blog.findById(req.params.id);
@@ -205,14 +232,13 @@ export const addComment = async (req, res) => {
     blog.commentsCount += 1;
     await blog.save();
 
-    const payload = await buildBlogWithComments(blog._id, { page: 1, limit: 20 });
+    const payload = await buildBlogWithComments(blog._id, { page: 1, limit: 20, cursor: null });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// Share a blog
 export const shareBlog = async (req, res) => {
   try {
     const blog = await Blog.findById(req.params.id);
@@ -226,43 +252,28 @@ export const shareBlog = async (req, res) => {
   }
 };
 
-// Trending Blogs (most views + likes)
 export const getTrendingBlogs = async (req, res) => {
   try {
     const blogs = await Blog.aggregate([
-      {
-        $addFields: {
-          likesCount: { $size: "$likes" } // 1. Calculate the size of the likes array
-        }
-      },
-      {
-        $sort: { 
-          likesCount: -1, // 2. Sort by the new calculated field (Highest likes first)
-          views: -1       // 3. If likes are equal, sort by views
-        }
-      },
-      {
-        $limit: 10 // 4. Get top 10
-      },
-      // 5. Since 'populate' doesn't work in aggregate, we use $lookup to get author details
+      { $addFields: { likesCount: { $size: "$likes" } } },
+      { $sort: { likesCount: -1, views: -1 } },
+      { $limit: 10 },
       {
         $lookup: {
-          from: "users",       // IMPORTANT: This must match your User collection name in MongoDB (usually lowercase plural 'users')
+          from: "users",
           localField: "author",
           foreignField: "_id",
-          as: "author"
-        }
+          as: "author",
+        },
       },
-      {
-        $unwind: "$author" // 6. Lookup returns an array, this converts it to a single object
-      },
+      { $unwind: "$author" },
       {
         $project: {
-          "author.password": 0, // 7. Remove sensitive author data
+          "author.password": 0,
           "author.createdAt": 0,
-          "author.updatedAt": 0
-        }
-      }
+          "author.updatedAt": 0,
+        },
+      },
     ]);
 
     res.json(blogs);
@@ -270,6 +281,7 @@ export const getTrendingBlogs = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
 export const editComment = async (req, res) => {
   try {
     const { id, commentId } = req.params;
@@ -289,7 +301,6 @@ export const editComment = async (req, res) => {
       return res.status(404).json({ message: "Comment not found" });
     }
 
-    // only comment author can edit
     if (comment.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized" });
     }
@@ -298,7 +309,7 @@ export const editComment = async (req, res) => {
     comment.editedAt = new Date();
     await comment.save();
 
-    const payload = await buildBlogWithComments(id, { page: 1, limit: 20 });
+    const payload = await buildBlogWithComments(id, { page: 1, limit: 20, cursor: null });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -332,7 +343,7 @@ export const deleteComment = async (req, res) => {
     }
     await blog.save();
 
-    const payload = await buildBlogWithComments(blog._id, { page: 1, limit: 20 });
+    const payload = await buildBlogWithComments(blog._id, { page: 1, limit: 20, cursor: null });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
