@@ -6,6 +6,7 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import blogRoutes from "./routes/blogRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
+import { errorHandler, notFound } from "./middlewares/errorMiddleware.js";
 
 
 dotenv.config();
@@ -35,6 +36,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/blogs",blogRoutes);
 app.use("/api/profile", profileRoutes);
 
+app.use(notFound);
+app.use(errorHandler);
 
 
 // Start Server
