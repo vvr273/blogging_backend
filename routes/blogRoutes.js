@@ -54,4 +54,9 @@ router.post("/:id/comments", protect, validateCommentPayload, addComment);
 router.put("/:id/comments/:commentId", protect, validateCommentPayload, editComment);
 router.delete("/:id/comments/:commentId", protect, deleteComment);
 
+// Temporary backward-compatible aliases (remove after frontend cache/deploy is stable)
+router.post("/:id/comment", protect, validateCommentPayload, addComment);
+router.put("/:id/comment/:commentId", protect, validateCommentPayload, editComment);
+router.delete("/:id/comment/:commentId", protect, deleteComment);
+
 export default router;
