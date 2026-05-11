@@ -54,10 +54,11 @@ test("comment CRUD works via /api/blogs/:id/comments endpoints", async () => {
     .send({ text: "First comment" });
 
   assert.equal(createRes.status, 200);
-  assert.equal(createRes.body.comments.length, 1);
-  assert.equal(createRes.body.comments[0].text, "First comment");
+  assert.equal(createRes.body.success, true);
+  assert.equal(createRes.body.data.comments.length, 1);
+  assert.equal(createRes.body.data.comments[0].text, "First comment");
 
-  const commentId = createRes.body.comments[0]._id;
+  const commentId = createRes.body.data.comments[0]._id;
 
   const editRes = await request(app)
     .put(`/api/blogs/${blog._id}/comments/${commentId}`)
@@ -65,14 +66,16 @@ test("comment CRUD works via /api/blogs/:id/comments endpoints", async () => {
     .send({ text: "Updated comment" });
 
   assert.equal(editRes.status, 200);
-  assert.equal(editRes.body.comments[0].text, "Updated comment");
+  assert.equal(editRes.body.success, true);
+  assert.equal(editRes.body.data.comments[0].text, "Updated comment");
 
   const deleteRes = await request(app)
     .delete(`/api/blogs/${blog._id}/comments/${commentId}`)
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(deleteRes.status, 200);
-  assert.equal(deleteRes.body.comments.length, 0);
+  assert.equal(deleteRes.body.success, true);
+  assert.equal(deleteRes.body.data.comments.length, 0);
 
   const remaining = await Comment.countDocuments({ blog: blog._id });
   assert.equal(remaining, 0);
