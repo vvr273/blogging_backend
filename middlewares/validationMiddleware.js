@@ -6,6 +6,7 @@ const fail = (res, message) =>
     message,
     code: "VALIDATION_ERROR",
     details: [],
+    requestId: res.req.requestId,
   });
 
 export const validateRegister = (req, res, next) => {

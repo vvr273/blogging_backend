@@ -4,7 +4,7 @@ export const requestLogger = (req, res, next) => {
   res.on("finish", () => {
     const durationMs = Date.now() - start;
     console.log(
-      `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`
+      `[${new Date().toISOString()}] [${req.requestId || "-"}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`
     );
   });
 
