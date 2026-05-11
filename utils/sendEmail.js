@@ -1,6 +1,5 @@
 import nodemailer from "nodemailer";
 
-
 const sendEmail = async (to, subject, html) => {
   try {
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
