@@ -27,7 +27,6 @@ const userSchema = new mongoose.Schema({
   profileImage: { type: String, default: "", maxlength: 2048 }
 }, { timestamps: true });
 
-userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ username: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model("User", userSchema);

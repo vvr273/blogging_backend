@@ -1,12 +1,27 @@
 import Blog from "../models/Blog.js";
 import Comment from "../models/Comment.js";
 
-const buildBlogWithComments = async (blogId) => {
+const parsePagination = (req, defaults = { page: 1, limit: 10, maxLimit: 100 }) => {
+  const rawPage = Number.parseInt(req.query.page, 10);
+  const rawLimit = Number.parseInt(req.query.limit, 10);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : defaults.page;
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, defaults.maxLimit)
+    : defaults.limit;
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+const buildBlogWithComments = async (blogId, options = { page: 1, limit: 20 }) => {
   const blog = await Blog.findById(blogId).populate("author", "name email");
   if (!blog) return null;
 
+  const { page, limit } = options;
+  const skip = (page - 1) * limit;
+  const totalComments = await Comment.countDocuments({ blog: blogId });
   const comments = await Comment.find({ blog: blogId })
     .sort({ createdAt: 1 })
+    .skip(skip)
+    .limit(limit)
     .populate("user", "name");
 
   const payload = blog.toObject();
@@ -17,6 +32,12 @@ const buildBlogWithComments = async (blogId) => {
     createdAt: comment.createdAt,
     editedAt: comment.editedAt,
   }));
+  payload.commentsPagination = {
+    page,
+    limit,
+    total: totalComments,
+    totalPages: Math.ceil(totalComments / limit) || 1,
+  };
 
   return payload;
 };
@@ -49,10 +70,22 @@ export const createBlog = async (req, res) => {
 // Get all blogs
 export const getAllBlogs = async (req, res) => {
   try {
+    const hasPaginationQuery = req.query.page !== undefined || req.query.limit !== undefined;
+    const { page, limit, skip } = parsePagination(req, { page: 1, limit: 12, maxLimit: 50 });
+    const total = await Blog.countDocuments();
     const blogs = await Blog.find()
       .populate("author", "name email")
-      .sort({ createdAt: -1 });
-    res.json(blogs);
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+    if (!hasPaginationQuery) return res.json(blogs);
+    res.json({
+      items: blogs,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -60,8 +93,22 @@ export const getAllBlogs = async (req, res) => {
 // Get blogs of the logged-in user
 export const getMyBlogs = async (req, res) => {
   try {
-    const blogs = await Blog.find({ author: req.user._id }).sort({ createdAt: -1 });
-    res.json(blogs);
+    const hasPaginationQuery = req.query.page !== undefined || req.query.limit !== undefined;
+    const { page, limit, skip } = parsePagination(req, { page: 1, limit: 12, maxLimit: 50 });
+    const query = { author: req.user._id };
+    const total = await Blog.countDocuments(query);
+    const blogs = await Blog.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+    if (!hasPaginationQuery) return res.json(blogs);
+    res.json({
+      items: blogs,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -71,23 +118,14 @@ export const getMyBlogs = async (req, res) => {
 // Get single blog & increment views
 export const getSingleBlog = async (req, res) => {
   try {
+    const { page, limit } = parsePagination(req, { page: 1, limit: 20, maxLimit: 100 });
     const blog = await Blog.findById(req.params.id).populate("author", "name email");
     if (!blog) return res.status(404).json({ message: "Blog not found" });
 
     // Increment views
     blog.views += 1;
     await blog.save();
-    const comments = await Comment.find({ blog: blog._id })
-      .sort({ createdAt: 1 })
-      .populate("user", "name");
-    const payload = blog.toObject();
-    payload.comments = comments.map((comment) => ({
-      _id: comment._id,
-      user: comment.user,
-      text: comment.text,
-      createdAt: comment.createdAt,
-      editedAt: comment.editedAt,
-    }));
+    const payload = await buildBlogWithComments(blog._id, { page, limit });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -167,7 +205,7 @@ export const addComment = async (req, res) => {
     blog.commentsCount += 1;
     await blog.save();
 
-    const payload = await buildBlogWithComments(blog._id);
+    const payload = await buildBlogWithComments(blog._id, { page: 1, limit: 20 });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -260,7 +298,7 @@ export const editComment = async (req, res) => {
     comment.editedAt = new Date();
     await comment.save();
 
-    const payload = await buildBlogWithComments(id);
+    const payload = await buildBlogWithComments(id, { page: 1, limit: 20 });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -294,7 +332,7 @@ export const deleteComment = async (req, res) => {
     }
     await blog.save();
 
-    const payload = await buildBlogWithComments(blog._id);
+    const payload = await buildBlogWithComments(blog._id, { page: 1, limit: 20 });
     res.json(payload);
   } catch (err) {
     res.status(500).json({ message: err.message });
