@@ -40,14 +40,22 @@ Create a `.env` file in `blogging_backend/`:
 PORT=5000
 MONGO_URI=mongodb_connection_string
 JWT_SECRET=your_jwt_secret
-CLIENT_URL=http://localhost:5173
+FRONTEND_URL=http://localhost:5173
+BACKEND_URL=http://localhost:5000
 
 # SMTP (Gmail) config
-EMAIL_USER=your_gmail_address
-EMAIL_PASS=your_gmail_app_password
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_SECURE=false
+SMTP_USER=your_gmail_address
+SMTP_PASS=your_gmail_app_password
+MAIL_FROM="Auth App <your_gmail_address>"
+
+EMAIL_OTP_SECRET=your_email_otp_secret
+OTP_TTL_MIN=10
+OTP_COOLDOWN_SEC=60
+OTP_DAILY_LIMIT=10
+OTP_MAX_ATTEMPTS=5
 
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
 
@@ -87,7 +95,8 @@ Mounted prefixes:
 - `POST /google-login`
 - `GET /verify/:token`
 - `POST /forgot-password`
-- `POST /reset-password/:token`
+- `POST /forgot-password/resend-otp`
+- `POST /reset-password-otp`
 - `GET /dashboard` (protected)
 - `PUT /water` (protected)
 - `POST /todos` (protected)

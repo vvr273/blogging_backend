@@ -1,7 +1,9 @@
-const requiredKeys = ["MONGO_URI", "JWT_SECRET", "CLIENT_URL"];
+const requiredKeys = ["MONGO_URI", "JWT_SECRET"];
 
 const validateBaseEnv = () => {
   const missing = requiredKeys.filter((key) => !process.env[key]);
+  const hasFrontendUrl = Boolean(process.env.FRONTEND_URL || process.env.CLIENT_URL);
+  if (!hasFrontendUrl) missing.push("FRONTEND_URL (or CLIENT_URL)");
   if (missing.length) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }

@@ -2,7 +2,8 @@
 import sendEmail from "./sendEmail.js";
 
 export const sendVerificationEmail = async (userEmail, token) => {
-  const link = `${process.env.CLIENT_URL}/verify/${token}`;
+  const clientUrl = process.env.FRONTEND_URL || process.env.CLIENT_URL;
+  const link = `${clientUrl}/verify/${token}`;
   const html = `
     <div style="font-family: Arial, sans-serif; background-color: #f2eaf3; padding: 20px;">
       <div style="max-width: 600px; margin: auto; background-color: #fff; border-radius: 10px; padding: 30px; text-align: center;">

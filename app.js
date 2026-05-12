@@ -11,7 +11,7 @@ import { requestContext } from "./middlewares/requestContext.js";
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGIN || process.env.CLIENT_URL || "")
+const allowedOrigins = (process.env.CORS_ORIGIN || process.env.FRONTEND_URL || process.env.CLIENT_URL || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
