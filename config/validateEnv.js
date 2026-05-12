@@ -13,9 +13,7 @@ const validateMailEnv = () => {
   const hasSmtpCreds = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
   const hasEmailCreds = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
   if (!hasSmtpCreds && !hasEmailCreds) {
-    throw new Error(
-      "Missing SMTP credentials: set SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_PASS"
-    );
+    throw new Error("Missing SMTP credentials: set SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_PASS");
   }
 };
 
