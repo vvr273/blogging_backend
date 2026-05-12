@@ -18,6 +18,32 @@ const transporter = nodemailer.createTransport({
   auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined,
 });
 
+export const verifySmtpConnection = async () => {
+  const safeConfig = {
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpSecure,
+    hasUser: Boolean(smtpUser),
+    hasPass: Boolean(smtpPass),
+    mailFrom,
+  };
+
+  console.log("SMTP config loaded:", safeConfig);
+
+  try {
+    await transporter.verify();
+    console.log("SMTP verify success");
+  } catch (err) {
+    console.error("SMTP verify failed:", {
+      message: err?.message,
+      code: err?.code,
+      command: err?.command,
+      responseCode: err?.responseCode,
+      response: err?.response,
+    });
+  }
+};
+
 const sendEmail = async (to, subject, html) => {
   try {
     if (!smtpUser || !smtpPass) {
