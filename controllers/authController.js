@@ -3,16 +3,44 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
+import { sendResetPasswordEmail } from "../utils/sendResetPasswordEmail.js";
+import { sendOtpEmail } from "../utils/sendOtpEmail.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// ===== REGISTER =====
-// Add this import at the top of authController.js
-import { sendVerificationEmail } from "../utils/sendVerificationEmail.js";
-const sendVerificationEmailNow = async (user, expiresIn = "30m") => {
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn });
-  await sendVerificationEmail(user.email, token);
+const OTP_EXPIRY_MINUTES = 10;
+const OTP_RESEND_COOLDOWN_SECONDS = 60;
+const OTP_MAX_ATTEMPTS = 5;
+
+const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
+
+const hashOtp = (otp) =>
+  crypto
+    .createHash("sha256")
+    .update(`${otp}${process.env.EMAIL_OTP_SECRET || process.env.JWT_SECRET}`)
+    .digest("hex");
+
+const issueAndSendOtp = async (user, requestId) => {
+  const otp = generateOtp();
+  user.emailOtpHash = hashOtp(otp);
+  user.emailOtpExpires = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+  user.emailOtpAttempts = 0;
+  user.emailOtpLastSentAt = new Date();
+  await user.save({ validateBeforeSave: false });
+
+  try {
+    await sendOtpEmail(user.email, otp);
+  } catch (err) {
+    console.error("OTP email send failed:", {
+      requestId,
+      userId: user._id?.toString?.(),
+      email: user.email,
+      message: err.message,
+    });
+    throw err;
+  }
 };
+
 const sendResetPasswordEmailNow = async (email, token, requestId) => {
   try {
     await sendResetPasswordEmail(email, token);
@@ -27,48 +55,114 @@ const sendResetPasswordEmailNow = async (email, token, requestId) => {
 };
 
 export const register = async (req, res) => {
-  try { 
+  try {
     const { name, email, password } = req.body;
     let user = await User.findOne({ email });
 
     if (user) {
-      if (!user.isVerified) {
-        await sendVerificationEmailNow(user, "2h");
-        return res.status(200).json({ message: "Verification email sent. Check inbox." });
+      if (user.isVerified) {
+        return res.status(400).json({ message: "User already exists and verified" });
       }
-      return res.status(400).json({ message: "User already exists and verified" });
+
+      const secondsSinceLastOtp = user.emailOtpLastSentAt
+        ? Math.floor((Date.now() - new Date(user.emailOtpLastSentAt).getTime()) / 1000)
+        : OTP_RESEND_COOLDOWN_SECONDS;
+
+      if (secondsSinceLastOtp < OTP_RESEND_COOLDOWN_SECONDS) {
+        return res.status(429).json({
+          message: `Please wait ${OTP_RESEND_COOLDOWN_SECONDS - secondsSinceLastOtp}s before requesting another OTP.`,
+        });
+      }
+
+      await issueAndSendOtp(user, req.requestId);
+      return res.status(200).json({ message: "OTP sent to your email. Verify to activate account." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     user = await User.create({ name, email, password: hashedPassword });
 
-    await sendVerificationEmailNow(user, "30m");
-    res.status(201).json({ message: "User registered. Verification email sent." });
+    await issueAndSendOtp(user, req.requestId);
+    return res.status(201).json({ message: "User registered. OTP sent to your email." });
   } catch (err) {
-    console.error("Signup Error:", err); // Log the actual error to Render logs
-    res.status(500).json({ message: "Registration failed. Unable to send verification email." });
+    console.error("Signup Error:", err);
+    return res.status(500).json({ message: "Registration failed. Unable to send OTP email." });
   }
 };
 
-export const resendVerification = async (req, res) => {
+export const verifyEmailOtp = async (req, res) => {
   try {
-    const { email } = req.body;
-    const genericMessage = "If the account exists and is not verified, a verification email has been sent.";
+    const { email, otp } = req.body;
     const user = await User.findOne({ email });
-    if (!user || user.isVerified) return res.json({ message: genericMessage });
-    await sendVerificationEmailNow(user, "2h");
-    return res.json({ message: genericMessage });
+
+    if (!user || user.isVerified) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    if (!user.emailOtpHash || !user.emailOtpExpires || user.emailOtpExpires < new Date()) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    if ((user.emailOtpAttempts || 0) >= OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ message: "Too many attempts. Request a new OTP." });
+    }
+
+    const incomingHash = hashOtp(otp);
+    if (incomingHash !== user.emailOtpHash) {
+      user.emailOtpAttempts = (user.emailOtpAttempts || 0) + 1;
+      await user.save({ validateBeforeSave: false });
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    user.isVerified = true;
+    user.emailOtpHash = null;
+    user.emailOtpExpires = null;
+    user.emailOtpAttempts = 0;
+    user.emailOtpLastSentAt = null;
+    await user.save({ validateBeforeSave: false });
+
+    return res.json({ message: "Email verified successfully." });
   } catch (err) {
-    console.error("Resend verification error:", {
+    console.error("Verify OTP error:", {
       requestId: req.requestId,
       message: err.message,
       stack: err.stack,
     });
-    return res.status(500).json({ message: "Failed to send verification email" });
+    return res.status(500).json({ message: "Failed to verify OTP" });
   }
 };
 
-// ===== VERIFY EMAIL =====
+export const resendEmailOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const genericMessage = "If the account exists and is not verified, an OTP has been sent.";
+
+    const user = await User.findOne({ email });
+    if (!user || user.isVerified) return res.json({ message: genericMessage });
+
+    const secondsSinceLastOtp = user.emailOtpLastSentAt
+      ? Math.floor((Date.now() - new Date(user.emailOtpLastSentAt).getTime()) / 1000)
+      : OTP_RESEND_COOLDOWN_SECONDS;
+
+    if (secondsSinceLastOtp < OTP_RESEND_COOLDOWN_SECONDS) {
+      return res.status(429).json({
+        message: `Please wait ${OTP_RESEND_COOLDOWN_SECONDS - secondsSinceLastOtp}s before requesting another OTP.`,
+      });
+    }
+
+    await issueAndSendOtp(user, req.requestId);
+    return res.json({ message: genericMessage });
+  } catch (err) {
+    console.error("Resend OTP error:", {
+      requestId: req.requestId,
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ message: "Failed to resend OTP" });
+  }
+};
+
+export const resendVerification = resendEmailOtp;
+
 export const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
@@ -80,63 +174,31 @@ export const verifyEmail = async (req, res) => {
   }
 };
 
-// ===== LOGIN =====
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: "Invalid credentials" });
-    if (!user.isVerified) return res.status(400).json({ message: "Verify your email first" });
+    if (!user.isVerified) return res.status(400).json({ message: "Verify your email with OTP first" });
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
-    
-    res.json({ token, user: { id: user._id, email: user.email,waterCounter: user.waterCounter || 0,todos: user.todos || [] } });
+
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        waterCounter: user.waterCounter || 0,
+        todos: user.todos || [],
+      },
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
-
-// ===== GOOGLE LOGIN =====
-// export const googleLogin = async (req, res) => {
-//   try {
-//     const { tokenId } = req.body;
-//     const ticket = await googleClient.verifyIdToken({ idToken: tokenId, audience: process.env.GOOGLE_CLIENT_ID });
-//     const payload = ticket.getPayload();
-
-//     let user = await User.findOne({ email: payload.email });
-//     if (!user) {
-//       user = await User.create({ name: payload.name, email: payload.email, googleId: payload.sub, isVerified: true });
-//     }
-
-//     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
-//     res.json({ token, user: { id: user._id, email: user.email } });
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// };
-
-// ===== FORGOT PASSWORD =====
-// export const forgotPassword = async (req, res) => {
-//   const { email } = req.body;
-//   const user = await User.findOne({ email });
-//   if (!user) return res.status(400).json({ message: "User not found" });
-
-//   const token = crypto.randomBytes(20).toString("hex");
-//   user.resetPasswordToken = token;
-//   user.resetPasswordExpires = Date.now() + 3600000;
-//   await user.save();
-
-//   const resetUrl = `${process.env.CLIENT_URL}/reset-password/${token}`;
-//   await sendEmail(user.email, "Reset Password", `Click to reset: ${resetUrl}`);
-
-//   res.json({ message: "Password reset email sent" });
-// };
-// import crypto from "crypto";
-import { sendResetPasswordEmail } from "../utils/sendResetPasswordEmail.js";
-// Make sure User is also imported
 
 export const forgotPassword = async (req, res) => {
   try {
@@ -171,26 +233,6 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-
-// ===== RESET PASSWORD =====
-// export const resetPassword = async (req, res) => {
-//   const { token } = req.params;
-//   const { password } = req.body;
-
-//   const user = await User.findOne({
-//     resetPasswordToken: token,
-//     resetPasswordExpires: { $gt: Date.now() }
-//   });
-
-//   if (!user) return res.status(400).json({ message: "Invalid or expired token" });
-
-//   user.password = await bcrypt.hash(password, 10);
-//   user.resetPasswordToken = undefined;
-//   user.resetPasswordExpires = undefined;
-//   await user.save();
-
-//   res.json({ message: "Password reset successful" });
-// };
 export const resetPassword = async (req, res) => {
   const { token } = req.params;
   const { password } = req.body;
@@ -198,7 +240,7 @@ export const resetPassword = async (req, res) => {
 
   const user = await User.findOne({
     resetPasswordToken: hashedToken,
-    resetPasswordExpires: { $gt: Date.now() }
+    resetPasswordExpires: { $gt: Date.now() },
   });
 
   if (!user) return res.status(400).json({ message: "Invalid or expired token" });
@@ -212,15 +254,13 @@ export const resetPassword = async (req, res) => {
   res.json({ message: "Password reset successful" });
 };
 
-// Google Login
 export const googleLogin = async (req, res) => {
   try {
-    const { credential } = req.body; // frontend sends { credential }
+    const { credential } = req.body;
     if (!credential) {
       return res.status(400).json({ message: "No credential provided" });
-    }  
+    }
 
-    // Verify Google token
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -229,7 +269,6 @@ export const googleLogin = async (req, res) => {
     const payload = ticket.getPayload();
     const { email, name, picture } = payload;
 
-    // Check if user exists
     let user = await User.findOne({ email });
 
     if (!user) {
@@ -242,7 +281,6 @@ export const googleLogin = async (req, res) => {
       });
     }
 
-    // Create JWT for your app
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "1h",
     });
@@ -265,21 +303,20 @@ export const googleLogin = async (req, res) => {
     });
   }
 };
+
 export const getDashboard = async (req, res) => {
   const { name, email, waterCounter, todos } = req.user;
   res.json({ name, email, waterCounter, todos });
 };
 
-// ✅ Update water counter
 export const updateWaterCounter = async (req, res) => {
-  const { amount } = req.body; // amount to increment/decrement
+  const { amount } = req.body;
   req.user.waterCounter += amount;
   if (req.user.waterCounter < 0) req.user.waterCounter = 0;
   await req.user.save();
   res.json({ waterCounter: req.user.waterCounter });
 };
 
-// ✅ Add new todo
 export const addTodo = async (req, res) => {
   const { text } = req.body;
   if (!text) return res.status(400).json({ message: "Todo text required" });
@@ -288,7 +325,6 @@ export const addTodo = async (req, res) => {
   res.json({ todos: req.user.todos });
 };
 
-// ✅ Update todo (toggle done)
 export const toggleTodo = async (req, res) => {
   const { id } = req.params;
   const todo = req.user.todos.id(id);
@@ -298,8 +334,6 @@ export const toggleTodo = async (req, res) => {
   res.json({ todos: req.user.todos });
 };
 
-// ✅ Delete todo
-// controllers/todoController.js
 export const deleteTodo = async (req, res) => {
   try {
     const { id } = req.params;

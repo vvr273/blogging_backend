@@ -13,6 +13,10 @@ const userSchema = new mongoose.Schema({
   role: { type: String, default: "user", enum: ["user", "author", "admin"] },
   resetPasswordToken: { type: String, default: null },
   resetPasswordExpires: { type: Date, default: null },
+  emailOtpHash: { type: String, default: null },
+  emailOtpExpires: { type: Date, default: null },
+  emailOtpAttempts: { type: Number, default: 0 },
+  emailOtpLastSentAt: { type: Date, default: null },
   waterCounter: { type: Number, default: 0 },
   todos: [
     {
