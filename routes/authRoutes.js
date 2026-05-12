@@ -1,7 +1,6 @@
 // backend/routes/authRoutes.js
 import express from "express";
 import { protect } from "../middlewares/authMiddleware.js";
-import arcjectm from "../middlewares/arcjectMiddleware.js";
 import {
   register,
   login,
@@ -33,15 +32,15 @@ import {
 const router = express.Router();
 
 // Public routes
-router.post("/register", arcjectm, validateRegister, register);
-router.post("/login", arcjectm, validateLogin, login);
-router.post("/google-login", arcjectm, validateGoogleLogin, googleLogin);
+router.post("/register", validateRegister, register);
+router.post("/login", validateLogin, login);
+router.post("/google-login", validateGoogleLogin, googleLogin);
 router.get("/verify/:token",verifyEmail);
-router.post("/verify-otp", arcjectm, validateVerifyOtp, verifyEmailOtp);
-router.post("/resend-otp", arcjectm, validateResendVerification, resendEmailOtp);
-router.post("/resend-verification", arcjectm, validateResendVerification, resendVerification);
-router.post("/forgot-password", arcjectm, validateForgotPassword, forgotPassword);
-router.post("/reset-password/:token", arcjectm, validateResetPassword, resetPassword);
+router.post("/verify-otp", validateVerifyOtp, verifyEmailOtp);
+router.post("/resend-otp", validateResendVerification, resendEmailOtp);
+router.post("/resend-verification", validateResendVerification, resendVerification);
+router.post("/forgot-password", validateForgotPassword, forgotPassword);
+router.post("/reset-password/:token", validateResetPassword, resetPassword);
 
 // Protected routes
 router.get("/dashboard", protect, getDashboard);
