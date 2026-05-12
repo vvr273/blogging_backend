@@ -1,4 +1,5 @@
 import User from "../models/User.js";
+import OtpVerification from "../models/OtpVerification.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -8,9 +9,10 @@ import { sendOtpEmail } from "../utils/sendOtpEmail.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const OTP_EXPIRY_MINUTES = 10;
-const OTP_RESEND_COOLDOWN_SECONDS = 60;
-const OTP_MAX_ATTEMPTS = 5;
+const OTP_EXPIRY_MINUTES = Number(process.env.OTP_TTL_MIN || 10);
+const OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.OTP_COOLDOWN_SEC || 60);
+const OTP_DAILY_LIMIT = Number(process.env.OTP_DAILY_LIMIT || 10);
+const OTP_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS || 5);
 
 const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
 
@@ -20,13 +22,43 @@ const hashOtp = (otp) =>
     .update(`${otp}${process.env.EMAIL_OTP_SECRET || process.env.JWT_SECRET}`)
     .digest("hex");
 
+const dayKey = (date = new Date()) => date.toISOString().slice(0, 10);
+
 const issueAndSendOtp = async (user, requestId) => {
+  const now = new Date();
+  const key = dayKey(now);
+  let record = await OtpVerification.findOne({ userId: user._id });
+  if (!record) record = new OtpVerification({ userId: user._id, resendDayKey: key });
+
+  if (record.resendDayKey !== key) {
+    record.resendDayKey = key;
+    record.resendCountDaily = 0;
+  }
+
+  if (record.lastSentAt) {
+    const nextAllowedAt = new Date(record.lastSentAt.getTime() + OTP_RESEND_COOLDOWN_SECONDS * 1000);
+    if (now < nextAllowedAt) {
+      const waitSeconds = Math.ceil((nextAllowedAt.getTime() - now.getTime()) / 1000);
+      const err = new Error(`Please wait ${waitSeconds}s before requesting another OTP.`);
+      err.code = "COOLDOWN";
+      throw err;
+    }
+  }
+
+  if (record.resendCountDaily >= OTP_DAILY_LIMIT) {
+    const err = new Error("Daily resend limit reached");
+    err.code = "DAILY_LIMIT";
+    throw err;
+  }
+
   const otp = generateOtp();
-  user.emailOtpHash = hashOtp(otp);
-  user.emailOtpExpires = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
-  user.emailOtpAttempts = 0;
-  user.emailOtpLastSentAt = new Date();
-  await user.save({ validateBeforeSave: false });
+  record.otpHash = hashOtp(otp);
+  record.expiresAt = new Date(now.getTime() + OTP_EXPIRY_MINUTES * 60 * 1000);
+  record.attempts = 0;
+  record.lastSentAt = now;
+  record.resendCountDaily += 1;
+  record.consumedAt = null;
+  await record.save();
 
   try {
     await sendOtpEmail(user.email, otp);
@@ -63,17 +95,6 @@ export const register = async (req, res) => {
       if (user.isVerified) {
         return res.status(400).json({ message: "User already exists and verified" });
       }
-
-      const secondsSinceLastOtp = user.emailOtpLastSentAt
-        ? Math.floor((Date.now() - new Date(user.emailOtpLastSentAt).getTime()) / 1000)
-        : OTP_RESEND_COOLDOWN_SECONDS;
-
-      if (secondsSinceLastOtp < OTP_RESEND_COOLDOWN_SECONDS) {
-        return res.status(429).json({
-          message: `Please wait ${OTP_RESEND_COOLDOWN_SECONDS - secondsSinceLastOtp}s before requesting another OTP.`,
-        });
-      }
-
       await issueAndSendOtp(user, req.requestId);
       return res.status(200).json({ message: "OTP sent to your email. Verify to activate account." });
     }
@@ -98,27 +119,29 @@ export const verifyEmailOtp = async (req, res) => {
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
-    if (!user.emailOtpHash || !user.emailOtpExpires || user.emailOtpExpires < new Date()) {
+    const record = await OtpVerification.findOne({ userId: user._id });
+    if (!record || !record.otpHash || !record.expiresAt || record.expiresAt < new Date() || record.consumedAt) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
-    if ((user.emailOtpAttempts || 0) >= OTP_MAX_ATTEMPTS) {
+    if ((record.attempts || 0) >= OTP_MAX_ATTEMPTS) {
       return res.status(429).json({ message: "Too many attempts. Request a new OTP." });
     }
 
     const incomingHash = hashOtp(otp);
-    if (incomingHash !== user.emailOtpHash) {
-      user.emailOtpAttempts = (user.emailOtpAttempts || 0) + 1;
-      await user.save({ validateBeforeSave: false });
+    if (incomingHash !== record.otpHash) {
+      record.attempts = (record.attempts || 0) + 1;
+      await record.save();
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
     user.isVerified = true;
-    user.emailOtpHash = null;
-    user.emailOtpExpires = null;
-    user.emailOtpAttempts = 0;
-    user.emailOtpLastSentAt = null;
     await user.save({ validateBeforeSave: false });
+    record.consumedAt = new Date();
+    record.otpHash = null;
+    record.expiresAt = null;
+    record.attempts = 0;
+    await record.save();
 
     return res.json({ message: "Email verified successfully." });
   } catch (err) {
@@ -138,16 +161,6 @@ export const resendEmailOtp = async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user || user.isVerified) return res.json({ message: genericMessage });
-
-    const secondsSinceLastOtp = user.emailOtpLastSentAt
-      ? Math.floor((Date.now() - new Date(user.emailOtpLastSentAt).getTime()) / 1000)
-      : OTP_RESEND_COOLDOWN_SECONDS;
-
-    if (secondsSinceLastOtp < OTP_RESEND_COOLDOWN_SECONDS) {
-      return res.status(429).json({
-        message: `Please wait ${OTP_RESEND_COOLDOWN_SECONDS - secondsSinceLastOtp}s before requesting another OTP.`,
-      });
-    }
 
     await issueAndSendOtp(user, req.requestId);
     return res.json({ message: genericMessage });
