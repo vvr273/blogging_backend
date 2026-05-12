@@ -7,6 +7,8 @@ import {
   login,
   googleLogin,
   verifyEmail,
+  verifyEmailOtp,
+  resendEmailOtp,
   resendVerification,
   forgotPassword,
   resetPassword,
@@ -18,7 +20,8 @@ import {
 } from "../controllers/authController.js";
 import {
   validateForgotPassword,
-  validateForgotPassword as validateResendVerification,
+  validateResendVerification,
+  validateVerifyOtp,
   validateGoogleLogin,
   validateLogin,
   validateRegister,
@@ -34,6 +37,8 @@ router.post("/register", arcjectm, validateRegister, register);
 router.post("/login", arcjectm, validateLogin, login);
 router.post("/google-login", arcjectm, validateGoogleLogin, googleLogin);
 router.get("/verify/:token",verifyEmail);
+router.post("/verify-otp", arcjectm, validateVerifyOtp, verifyEmailOtp);
+router.post("/resend-otp", arcjectm, validateResendVerification, resendEmailOtp);
 router.post("/resend-verification", arcjectm, validateResendVerification, resendVerification);
 router.post("/forgot-password", arcjectm, validateForgotPassword, forgotPassword);
 router.post("/reset-password/:token", arcjectm, validateResetPassword, resetPassword);
