@@ -10,7 +10,8 @@ import {
   resendEmailOtp,
   resendVerification,
   forgotPassword,
-  resetPassword,
+  resendResetOtp,
+  resetPasswordWithOtp,
   getDashboard,
   updateWaterCounter,
   addTodo,
@@ -24,7 +25,7 @@ import {
   validateGoogleLogin,
   validateLogin,
   validateRegister,
-  validateResetPassword,
+  validateResetPasswordOtp,
   validateTodoText,
   validateWaterUpdate,
 } from "../middlewares/validationMiddleware.js";
@@ -40,7 +41,8 @@ router.post("/verify-otp", validateVerifyOtp, verifyEmailOtp);
 router.post("/resend-otp", validateResendVerification, resendEmailOtp);
 router.post("/resend-verification", validateResendVerification, resendVerification);
 router.post("/forgot-password", validateForgotPassword, forgotPassword);
-router.post("/reset-password/:token", validateResetPassword, resetPassword);
+router.post("/forgot-password/resend-otp", validateForgotPassword, resendResetOtp);
+router.post("/reset-password-otp", validateResetPasswordOtp, resetPasswordWithOtp);
 
 // Protected routes
 router.get("/dashboard", protect, getDashboard);
