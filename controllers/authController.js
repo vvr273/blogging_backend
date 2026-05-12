@@ -265,6 +265,12 @@ export const forgotPassword = async (req, res) => {
 
     res.json({ message: genericMessage });
   } catch (err) {
+    if (err.code === "COOLDOWN") {
+      return res.status(429).json({ message: err.message, code: err.code });
+    }
+    if (err.code === "DAILY_LIMIT") {
+      return res.status(429).json({ message: "Daily resend limit reached", code: err.code });
+    }
     console.error("Forgot password error:", {
       requestId: req.requestId,
       message: err.message,
@@ -286,6 +292,12 @@ export const resendResetOtp = async (req, res) => {
     await issueAndSendResetOtp(user, req.requestId);
     return res.json({ message: genericMessage });
   } catch (err) {
+    if (err.code === "COOLDOWN") {
+      return res.status(429).json({ message: err.message, code: err.code });
+    }
+    if (err.code === "DAILY_LIMIT") {
+      return res.status(429).json({ message: "Daily resend limit reached", code: err.code });
+    }
     console.error("Resend reset OTP error:", {
       requestId: req.requestId,
       message: err.message,
