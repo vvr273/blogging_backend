@@ -1,11 +1,12 @@
 import User from "../models/User.js";
 import OtpVerification from "../models/OtpVerification.js";
+import PasswordResetOtp from "../models/PasswordResetOtp.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
-import { sendResetPasswordEmail } from "../utils/sendResetPasswordEmail.js";
 import { sendOtpEmail } from "../utils/sendOtpEmail.js";
+import { sendResetOtpEmail } from "../utils/sendResetOtpEmail.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -73,13 +74,48 @@ const issueAndSendOtp = async (user, requestId) => {
   }
 };
 
-const sendResetPasswordEmailNow = async (email, token, requestId) => {
+const issueAndSendResetOtp = async (user, requestId) => {
+  const now = new Date();
+  const key = dayKey(now);
+  let record = await PasswordResetOtp.findOne({ userId: user._id });
+  if (!record) record = new PasswordResetOtp({ userId: user._id, resendDayKey: key });
+
+  if (record.resendDayKey !== key) {
+    record.resendDayKey = key;
+    record.resendCountDaily = 0;
+  }
+
+  if (record.lastSentAt) {
+    const nextAllowedAt = new Date(record.lastSentAt.getTime() + OTP_RESEND_COOLDOWN_SECONDS * 1000);
+    if (now < nextAllowedAt) {
+      const waitSeconds = Math.ceil((nextAllowedAt.getTime() - now.getTime()) / 1000);
+      const err = new Error(`Please wait ${waitSeconds}s before requesting another reset OTP.`);
+      err.code = "COOLDOWN";
+      throw err;
+    }
+  }
+
+  if (record.resendCountDaily >= OTP_DAILY_LIMIT) {
+    const err = new Error("Daily resend limit reached");
+    err.code = "DAILY_LIMIT";
+    throw err;
+  }
+
+  const otp = generateOtp();
+  record.otpHash = hashOtp(otp);
+  record.expiresAt = new Date(now.getTime() + OTP_EXPIRY_MINUTES * 60 * 1000);
+  record.attempts = 0;
+  record.lastSentAt = now;
+  record.resendCountDaily += 1;
+  record.consumedAt = null;
+  await record.save();
+
   try {
-    await sendResetPasswordEmail(email, token);
+    await sendResetOtpEmail(user.email, otp);
   } catch (err) {
-    console.error("Reset password email send failed:", {
+    console.error("Reset OTP email send failed:", {
       requestId,
-      email,
+      email: user.email,
       message: err.message,
     });
     throw err;
@@ -217,7 +253,7 @@ export const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
     const genericMessage =
-      "If an account with that email exists, a password reset link has been sent.";
+      "If an account with that email exists, a password reset OTP has been sent.";
 
     if (!email) {
       return res.status(400).json({ message: "Email is required" });
@@ -225,15 +261,7 @@ export const forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user) return res.json({ message: genericMessage });
-
-    const token = crypto.randomBytes(32).toString("hex");
-    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-
-    user.resetPasswordToken = hashedToken;
-    user.resetPasswordExpires = Date.now() + 3600000;
-    await user.save();
-
-    await sendResetPasswordEmailNow(user.email, token, req.requestId);
+    await issueAndSendResetOtp(user, req.requestId);
 
     res.json({ message: genericMessage });
   } catch (err) {
@@ -246,25 +274,68 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-export const resetPassword = async (req, res) => {
-  const { token } = req.params;
-  const { password } = req.body;
-  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+export const resendResetOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const genericMessage =
+      "If an account with that email exists, a password reset OTP has been sent.";
 
-  const user = await User.findOne({
-    resetPasswordToken: hashedToken,
-    resetPasswordExpires: { $gt: Date.now() },
-  });
+    const user = await User.findOne({ email });
+    if (!user) return res.json({ message: genericMessage });
 
-  if (!user) return res.status(400).json({ message: "Invalid or expired token" });
+    await issueAndSendResetOtp(user, req.requestId);
+    return res.json({ message: genericMessage });
+  } catch (err) {
+    console.error("Resend reset OTP error:", {
+      requestId: req.requestId,
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ message: "Failed to resend reset OTP" });
+  }
+};
 
-  user.password = await bcrypt.hash(password, 10);
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpires = undefined;
+export const resetPasswordWithOtp = async (req, res) => {
+  try {
+    const { email, otp, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ message: "Invalid or expired OTP" });
 
-  await user.save({ validateBeforeSave: false });
+    const record = await PasswordResetOtp.findOne({ userId: user._id });
+    if (!record || !record.otpHash || !record.expiresAt || record.expiresAt < new Date() || record.consumedAt) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
 
-  res.json({ message: "Password reset successful" });
+    if ((record.attempts || 0) >= OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ message: "Too many attempts. Request a new OTP." });
+    }
+
+    if (record.otpHash !== hashOtp(otp)) {
+      record.attempts = (record.attempts || 0) + 1;
+      await record.save();
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    user.password = await bcrypt.hash(password, 10);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    record.consumedAt = new Date();
+    record.otpHash = null;
+    record.expiresAt = null;
+    record.attempts = 0;
+    await record.save();
+
+    return res.json({ message: "Password reset successful" });
+  } catch (err) {
+    console.error("Reset password with OTP error:", {
+      requestId: req.requestId,
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ message: "Failed to reset password" });
+  }
 };
 
 export const googleLogin = async (req, res) => {

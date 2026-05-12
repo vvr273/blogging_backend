@@ -46,6 +46,18 @@ export const validateVerifyOtp = (req, res, next) => {
   next();
 };
 
+export const validateResetPasswordOtp = (req, res, next) => {
+  const { email, otp, password } = req.body;
+  if (!email || !isEmail(email)) return fail(res, "Valid email is required");
+  if (!otp || typeof otp !== "string" || !/^\d{6}$/.test(otp)) {
+    return fail(res, "OTP must be a 6-digit code");
+  }
+  if (!password || typeof password !== "string" || password.length < 8 || password.length > 128) {
+    return fail(res, "Password must be between 8 and 128 characters");
+  }
+  next();
+};
+
 export const validateResetPassword = (req, res, next) => {
   const { password } = req.body;
   if (!password || typeof password !== "string" || password.length < 8 || password.length > 128) {
