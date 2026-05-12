@@ -44,12 +44,18 @@ FRONTEND_URL=http://localhost:5173
 BACKEND_URL=http://localhost:5000
 
 # SMTP (Gmail) config
+MAIL_PROVIDER=smtp
+SMTP_FALLBACK_TO_API=true
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your_gmail_address
 SMTP_PASS=your_gmail_app_password
 MAIL_FROM="Auth App <your_gmail_address>"
+
+# Resend API config (used when MAIL_PROVIDER=resend
+# or when SMTP_FALLBACK_TO_API=true and SMTP connection fails)
+RESEND_API_KEY=your_resend_api_key
 
 EMAIL_OTP_SECRET=your_email_otp_secret
 OTP_TTL_MIN=10

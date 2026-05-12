@@ -10,12 +10,21 @@ const validateBaseEnv = () => {
 };
 
 const validateMailEnv = () => {
+  const provider = (process.env.MAIL_PROVIDER || "smtp").toLowerCase();
   const hasSmtpCreds = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
   const hasEmailCreds = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+  const hasResend = Boolean(process.env.RESEND_API_KEY);
+  const allowFallback = String(process.env.SMTP_FALLBACK_TO_API || "true") === "true";
+
+  if (provider === "resend") {
+    if (!hasResend) throw new Error("Missing RESEND_API_KEY for MAIL_PROVIDER=resend");
+    if (!process.env.MAIL_FROM) throw new Error("Missing MAIL_FROM for MAIL_PROVIDER=resend");
+    return;
+  }
+
   if (!hasSmtpCreds && !hasEmailCreds) {
-    throw new Error(
-      "Missing SMTP credentials: set SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_PASS"
-    );
+    if (allowFallback && hasResend) return;
+    throw new Error("Missing SMTP credentials: set SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_PASS");
   }
 };
 
